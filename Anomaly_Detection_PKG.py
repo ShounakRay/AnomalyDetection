@@ -3,7 +3,7 @@
 # @Email:  rijshouray@gmail.com
 # @Filename: Anomaly_Detection_PKG.py
 # @Last modified by:   Ray
-# @Last modified time: 10-Feb-2021 23:02:35:357  GMT-0700
+# @Last modified time: 11-Feb-2021 15:02:87:871  GMT-0700
 # @License: [Private IP]
 
 
@@ -49,9 +49,7 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
                            TIME_COL='production_date', GROUPBY_COL='pair_name', plot=False, seed=42, n_jobs=-1):
     # Snakify columns and feature name
     data = util_snakify_cols(data)
-    feature, TIME_COL, GROUPBY_COL = snakecase(feature).replace('__', '_'),
-    snakecase(TIME_COL).replace('__', '_'),
-    snakecase(GROUPBY_COL).replace('__', '_')
+    feature, TIME_COL, GROUPBY_COL = snakecase(feature).replace('__', '_'), snakecase(TIME_COL).replace('__', '_'), snakecase(GROUPBY_COL).replace('__', '_')
 
     # Data-type verification and variable settings
     FIG_SIZE = (12, 8.27)
@@ -123,6 +121,8 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
     data.drop([GROUPBY_COL], 1, inplace=True)
     data.to_html('DATA_FILE_ANOMALY.html')
     # Filters for normalized DataFrame
+    print([TIME_COL] + ALL_FEATURES)
+    print(data)
     normalized_feature_data = data.copy()[[TIME_COL] + ALL_FEATURES]
     for ft in ALL_FEATURES:
         normalized_feature_data[ft] = util_normalize(normalized_feature_data[ft])
