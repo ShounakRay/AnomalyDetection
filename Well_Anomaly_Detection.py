@@ -3,7 +3,7 @@
 # @Email:  rijshouray@gmail.com
 # @Filename: Well_Anomaly_Detection.py
 # @Last modified by:   Ray
-# @Last modified time: 10-Feb-2021 22:02:81:818  GMT-0700
+# @Last modified time: 10-Feb-2021 23:02:41:412  GMT-0700
 # @License: [Private IP]
 
 
