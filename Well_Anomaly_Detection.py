@@ -1,28 +1,68 @@
+# @Author: Shounak Ray <Ray>
+# @Date:   05-Oct-2020 09:10:27:270  GMT-0600
+# @Email:  rijshouray@gmail.com
+# @Filename: Well_Anomaly_Detection.py
+# @Last modified by:   Ray
+# @Last modified time: 10-Feb-2021 19:02:98:984  GMT-0700
+# @License: [Private IP]
+
+######## SSH KEYS, RECORDS, AND INFORMATION ########
+# SSH KEY: macrepo$sho007
+# REFLINK: docs.github.com/en/github/authenticating-to-github/generating-a-new-
+#          ssh-key-and-adding-it-to-the-ssh-agent#generating-a-new-ssh-key
+# Your identification has been saved in /Users/Ray/.ssh/id_ed25519.
+# Your public key has been saved in /Users/Ray/.ssh/id_ed25519.pub.
+# The key fingerprint is:
+# SHA256:JPqpF21AzLZEjjZpRpCnp0nyzowSLQQb4jFCrueaak0 shounak@stanford.edu
+# The key's randomart image is:
+# +--[ED25519 256]--+
+# |...o.+.          |
+# |*o...+*          |
+# |=+ooB+o..        |
+# |+oo+.ooo         |
+# |o=.+.  oS        |
+# |oo=E ...o        |
+# | B+   oo         |
+# |o++. ..          |
+# |B   ..           |
+# +----[SHA256]-----+
+
+import datetime
+import io
+import itertools
+import json
+import os
+import pickle
+import random
+import sys
 ############################################################
 #################### DEPENDENCY IMPORTS ####################
 # For file IO
-import sys
-import os
-import io
+from collections import Counter as Counter
+from datetime import datetime, timedelta
+from itertools import chain
+
+import matplotlib.pyplot as plt
+import numpy as np
 # For processing
 import pandas as pd
+import ruptures as rpt
+import seaborn as sns
+import sklearn
+from generic_data_modeling import *
+from generic_data_prep import *
+from numpy import diff
+from sklearn.ensemble import IsolationForest
+from smoothline import *
+
+os.system('pip3 install git+https://git@github.com:ShounakRay/AutoAnalytics.git#egg=AutoAnalytics')
+
+
 os.chdir("/Users/Ray/Documents/Python/9 - Oil and Gas")
 sys.path.append("/Users/Ray/Documents/Python/8 - Data Preparation")
-sys.path.append("/Users/Ray/Documents/Python/REFERENCE FILES/distfit-1.1.5/distfit/utils")
-from generic_data_prep import *
-from generic_data_modeling import *
-from smoothline import *
-import datetime
-from datetime import datetime, timedelta
+sys.path.append(
+    "/Users/Ray/Documents/Python/REFERENCE FILES/distfit-1.1.5/distfit/utils")
 # For analytics
-import random
-import numpy as np
-from numpy import diff
-import itertools
-from itertools import chain
-import sklearn
-from sklearn.ensemble import IsolationForest
-import ruptures as rpt
 # import rpy2
 # from rpy2.robjects import FloatVector
 # from rpy2.robjects.packages import importr
@@ -33,44 +73,45 @@ import ruptures as rpt
 #     utils.install_packages(package)
 #     exec(package + " = importr('" + package + "')")
 # For visualization
-import matplotlib.pyplot as plt
-import seaborn as sns
 # For saving
-import pickle
-import json
-from collections import Counter as Counter
 
 ############################################################
 ##################### HYPER PARAMETERS #####################
-__FOLDER__ = r'/Users/Ray/Documents/Python/9 - Oil and Gas'
+__FOLDER__ = r'/Users/Ray/Documents/Python/9 - Oil and Gas/Husky'
 PATH_SANDALL = __FOLDER__ + r'/Data/Sandall/sandall.csv'
 PATH_EDAM_EAST = __FOLDER__ + r'/Data/Edam/edam_east.csv'
 PATH_EDAM_WEST = __FOLDER__ + r'/Data/Edam/edam_west.csv'
 PATH_VAWN = __FOLDER__ + r'/Data/Vawn/vawn_pvr_daily_2020_03_09.csv'
 
-INTERVAL = 90 # days, moving window width
-STEP = 15 # days, window translation amount per iteration
+INTERVAL = 90  # days, moving window width
+STEP = 15  # days, window translation amount per iteration
 PAD_COL = 'pad_name'
 GROUPBY_COL = 'pair_name'
 TIME_COL = 'production_date'
 
-### MAIN HARVESTER
+# MAIN HARVESTER
 # Iterate through all windows for outlier detection, statistical recording, etc....
+
+
 def feature_harvest(time_ranges, filtered_df, foi, time_col, groupby_col, groupby_value):
     well_statistics = []
     START_TIME = datetime.now()
     for t_range in time_ranges:
         # Filter DataFrame further for given window
-        window_filtered_df = reset_df_index(filtered_df[(filtered_df[time_col] > t_range[0]) & (filtered_df[time_col] < t_range[1]) & (filtered_df[groupby_col] == groupby_value)])
-        title = (groupby_value + ": " + str(t_range[0]) + " to " + str(t_range[1])).replace(' 00:00:00', '')
+        window_filtered_df = reset_df_index(filtered_df[(filtered_df[time_col] > t_range[0]) & (
+            filtered_df[time_col] < t_range[1]) & (filtered_df[groupby_col] == groupby_value)])
+        title = (groupby_value + ": " +
+                 str(t_range[0]) + " to " + str(t_range[1])).replace(' 00:00:00', '')
 
         # Proceed forward if original section is empty
         if(window_filtered_df.empty):
-            process_logger("WINDOW EMPTY: " + str(t_range[0]) + " - " + str(t_range[1]), START_TIME, name = 'feature_script_logger.txt')
+            process_logger("WINDOW EMPTY: " + str(t_range[0]) + " - " + str(
+                t_range[1]), START_TIME, name='feature_script_logger.txt')
             continue
 
         # Determine outliers for given window
-        outliers, trimmed, pct_out = outlier_detection(window_filtered_df, foi, title, manual_contamination = 0.1, plot = False)
+        outliers, trimmed, pct_out = outlier_detection(
+            window_filtered_df, foi, title, manual_contamination=0.1, plot=False)
 
         # Proceed forward if trimmed section is empty
         if(trimmed.empty):
@@ -78,7 +119,8 @@ def feature_harvest(time_ranges, filtered_df, foi, time_col, groupby_col, groupb
             if not(window_filtered_df.empty):
                 trimmed = window_filtered_df
             else:
-                process_logger("TRIMMED WINDOW ↓ EMPTY: " + str(t_range[0]) + " - " + str(t_range[1]), START_TIME, name = 'anomaly_script_logger.txt')
+                process_logger("TRIMMED WINDOW ↓ EMPTY: " + str(t_range[0]) + " - " + str(
+                    t_range[1]), START_TIME, name='anomaly_script_logger.txt')
                 continue
 
         # >> Application: Determine statistics for current windowed distribution and store
@@ -89,7 +131,8 @@ def feature_harvest(time_ranges, filtered_df, foi, time_col, groupby_col, groupb
         univ_stats['percent_outliers'] = pct_out
 
         well_statistics.append(tuple(univ_stats.iloc[0]))
-        process_logger(groupby_value + ", " + foi + ": " + str(t_range[0]) + " - " + str(t_range[1]), START_TIME, name = 'feature_script_logger.txt')
+        process_logger(groupby_value + ", " + foi + ": " + str(t_range[0]) + " - " + str(
+            t_range[1]), START_TIME, name='feature_script_logger.txt')
 
     # There was absolutely no (trimmed) data to scrape in the definied windows, then:
     if(len(well_statistics) == 0):
@@ -98,16 +141,22 @@ def feature_harvest(time_ranges, filtered_df, foi, time_col, groupby_col, groupb
         stat_features = list(univ_stats.columns)
     return well_statistics, stat_features
 # Master Function (INCOMPLETE)
+
+
 def find_anomalies(recording, well_name):
     minimas = recording[well_name]
 
-### ANOMALY DETECTION METHODS
+# ANOMALY DETECTION METHODS
 # Method A: Univariate Outlier Detection [Unsupervised Anomaly Detection] Process
-def outlier_detection(df, foi, title, y_label = 'Frequency', FIG_SIZE = (11.7, 8.27), manual_contamination = None, plot = False):
+
+
+def outlier_detection(df, foi, title, y_label='Frequency', FIG_SIZE=(11.7, 8.27), manual_contamination=None, plot=False):
     if(manual_contamination is None):
-        forest = IsolationForest(n_estimators = 100, contamination = 'auto', bootstrap = False)
+        forest = IsolationForest(
+            n_estimators=100, contamination='auto', bootstrap=False)
     elif(manual_contamination > 0.0 and manual_contamination < 1.0):
-        forest = IsolationForest(n_estimators = 100, contamination = manual_contamination, bootstrap = False, random_state = 303928462)
+        forest = IsolationForest(
+            n_estimators=100, contamination=manual_contamination, bootstrap=False, random_state=303928462)
     else:
         raise ValueError("'manual_contamination' argument is out-of-bounds.")
 
@@ -116,20 +165,24 @@ def outlier_detection(df, foi, title, y_label = 'Frequency', FIG_SIZE = (11.7, 8
         y_label = 'Value'
 
     forest.fit(df[foi].values.reshape(-1, 1))
-    reshaped_x = np.array(list(set(list(np.sort(df[foi].values))))).reshape(-1, 1) # np.linspace(df[foi].min(), df[foi].max(), len(df)).reshape(-1, 1)
+    # np.linspace(df[foi].min(), df[foi].max(), len(df)).reshape(-1, 1)
+    reshaped_x = np.array(
+        list(set(list(np.sort(df[foi].values))))).reshape(-1, 1)
     anomaly_score = forest.decision_function(reshaped_x)
     outlier = forest.predict(reshaped_x)
 
     if(plot):
-        plot_anomaly_scores(reshaped_x, anomaly_score, 'Anomaly Score', outlier, title, foi, FIG_SIZE = FIG_SIZE)
-        plot_outliers(reshaped_x, df, foi, title, outlier, bins = 100, FIG_SIZE = FIG_SIZE)
+        plot_anomaly_scores(reshaped_x, anomaly_score,
+                            'Anomaly Score', outlier, title, foi, FIG_SIZE=FIG_SIZE)
+        plot_outliers(reshaped_x, df, foi, title, outlier,
+                      bins=100, FIG_SIZE=FIG_SIZE)
 
     # Zipped Comprehension: 0.009
     temp = list(zip([i[0] for i in reshaped_x], outlier))
     outliers = [tup[0] for tup in temp if(tup[1] == -1)]
     trimmed = [tup[0] for tup in temp if(tup[1] == 1)]
 
-    outlier_pct = str(round((len(outliers)/float(len(temp)))*100, 3))
+    outlier_pct = str(round((len(outliers) / float(len(temp))) * 100, 3))
     # print('% Outliers Detected: ' + outlier_pct + "%")
 
     outliers_ret = reset_df_index(df[df[foi].map(lambda x: x in outliers)])
@@ -137,73 +190,88 @@ def outlier_detection(df, foi, title, y_label = 'Frequency', FIG_SIZE = (11.7, 8
 
     return outliers_ret, trimmed_ret, float(outlier_pct)
 # >> Plots anomaly scores for IsolationForest instance predictions
-def plot_anomaly_scores(reshaped_x, y, y_label, outlier, title, foi, FIG_SIZE = (11.7, 8.27)):
-    plt.figure(figsize = FIG_SIZE)
-    plt.plot([i[0] for i in reshaped_x], y, label = y_label)
+
+
+def plot_anomaly_scores(reshaped_x, y, y_label, outlier, title, foi, FIG_SIZE=(11.7, 8.27)):
+    plt.figure(figsize=FIG_SIZE)
+    plt.plot([i[0] for i in reshaped_x], y, label=y_label)
     plt.fill_between(reshaped_x.T[0], np.min(y), np.max(y),
-                     where = outlier == -1, color = 'r',
-                     alpha = 0.4, label ='Outlier Region')
+                     where=outlier == -1, color='r',
+                     alpha=0.4, label='Outlier Region')
     plt.legend()
     plt.suptitle(title)
     plt.ylabel('Anomaly Score')
     plt.xlabel(foi)
     plt.show()
 # >> Plots outliers in original density plot / distribution
-def plot_outliers(reshaped_x, df, foi, title, outlier, bins = 100, FIG_SIZE = (11.7, 8.27)):
-    sns.set(rc = {'figure.figsize': FIG_SIZE})
-    ax = sns.distplot(df[foi], bins = bins, color = 'b')
-    y_data = [rect.get_height() for rect in sns.distplot((df[foi]), bins = 100).patches]
+
+
+def plot_outliers(reshaped_x, df, foi, title, outlier, bins=100, FIG_SIZE=(11.7, 8.27)):
+    sns.set(rc={'figure.figsize': FIG_SIZE})
+    ax = sns.distplot(df[foi], bins=bins, color='b')
+    y_data = [rect.get_height()
+              for rect in sns.distplot((df[foi]), bins=100).patches]
     ax.set_title(title)
     ax.set_ylabel('Probability Density')
     ax.fill_between(reshaped_x.T[0], min(y_data), max(y_data),
-                     where = outlier == -1, color = 'r',
-                     alpha = 0.4, label = 'Outlier Region')
+                    where=outlier == -1, color='r',
+                    alpha=0.4, label='Outlier Region')
     plt.show()
 
 # Method B: Univariate Statistical Fetures
-def statistics(df, foi, detailed = True):
-    stats, _ = stat_metrics(df, foi, detailed = True)
+
+
+def statistics(df, foi, detailed=True):
+    stats, _ = stat_metrics(df, foi, detailed=True)
     return stats
 # >> Plots the frequency distribution and time-series for the metric of interest
-def plot_stats(df, metric, FIG_SIZE = (11.7/2, 8.27/2)):
-    plt.figure(figsize = FIG_SIZE)
-    plt.plot(list(df.index), df[metric], label = metric)
+
+
+def plot_stats(df, metric, FIG_SIZE=(11.7 / 2, 8.27 / 2)):
+    plt.figure(figsize=FIG_SIZE)
+    plt.plot(list(df.index), df[metric], label=metric)
     plt.ylabel(metric)
     plt.xlabel('Time interval')
     plt.legend()
-    plt.suptitle('Progression of \"' + metric + '\" metric over time interval', fontsize = 12)
+    plt.suptitle('Progression of \"' + metric +
+                 '\" metric over time interval', fontsize=12)
     plt.show()
     plt.close()
-    sns.set(rc = {'figure.figsize': tuple(0.952 * dim for dim in FIG_SIZE)})
-    ax = sns.distplot(df[metric], bins = 20)
-    ax.set_title('Frequency of \"' + metric + '\" in total time interval.', fontsize = 12)
+    sns.set(rc={'figure.figsize': tuple(0.952 * dim for dim in FIG_SIZE)})
+    ax = sns.distplot(df[metric], bins=20)
+    ax.set_title('Frequency of \"' + metric +
+                 '\" in total time interval.', fontsize=12)
     ax.set_ylabel('Frequency')
     plt.show()
     plt.close()
 
 # Method C: Offline Change Detection
-## For gradual, nuanced statistical data
-### Note: mean/median approximates "value" in time-series application if INTERVAL << 0
+# For gradual, nuanced statistical data
+# Note: mean/median approximates "value" in time-series application if INTERVAL << 0
+
+
 def stat_change_detection(harvest, group, feature, metric):
     metric_data = harvest[group][feature][metric]
-## For time_series data
+# For time_series data
 # Performs offline change detection on time-series data
-def change_detection_ts(data, penalty = 10, model = 'rbf', plot = True, title_append = '', FIG_SIZE = (12.0, 8.27)):
+
+
+def change_detection_ts(data, penalty=10, model='rbf', plot=True, title_append='', FIG_SIZE=(12.0, 8.27)):
     title_append = "\n" + title_append
-    algo = rpt.Pelt(model = "rbf").fit(data)
+    algo = rpt.Pelt(model="rbf").fit(data)
     if(penalty == 'bic'):
         T = np.asanyarray(data).shape
         sigma = np.asanyarray(data).std()
         bic_mod = np.sqrt(sigma) * np.log(T) * 1.0
         penalty = bic_mod
-    result = algo.predict(pen = penalty)
+    result = algo.predict(pen=penalty)
     # display
     # rpt.display(time_series, [0], result)
     if(plot):
-        figure = plt.figure(figsize = FIG_SIZE)
+        figure = plt.figure(figsize=FIG_SIZE)
         plt.plot([x for x in range(len(data))], data)
         for lines in result:
-            plt.axvline(x = lines, color = 'black', dashes = (2, 4))
+            plt.axvline(x=lines, color='black', dashes=(2, 4))
         plt.title('Offline Change Detection' + title_append)
         plt.xlabel('Time')
         plt.ylabel('Feature Value')
@@ -211,18 +279,24 @@ def change_detection_ts(data, penalty = 10, model = 'rbf', plot = True, title_ap
         plt.close()
     return result
 
-### UTILITY FUNCTION
+# UTILITY FUNCTION
 # Calculate all windows given start, end, and interval (optional last date range fitting disabled, deletion enabled)
-def windows(t_MIN, t_MAX, interval, moving = True, step = 1):
+
+
+def windows(t_MIN, t_MAX, interval, moving=True, step=1):
     if(moving):
-        all = [(t_MIN + timedelta(days = step * iteration), t_MIN + timedelta(days = step * iteration + interval), iteration + 1) for iteration in range(round((t_MAX - t_MIN).days/step))]
+        all = [(t_MIN + timedelta(days=step * iteration), t_MIN + timedelta(days=step * iteration +
+                                                                            interval), iteration + 1) for iteration in range(round((t_MAX - t_MIN).days / step))]
     else:
-        all = [(t_MIN + timedelta(days = iteration * interval), t_MIN + timedelta(days = (iteration + 1) * interval), iteration + 1) for iteration in range(round((t_MAX - t_MIN).days/interval))]
+        all = [(t_MIN + timedelta(days=iteration * interval), t_MIN + timedelta(days=(iteration + 1)
+                                                                                * interval), iteration + 1) for iteration in range(round((t_MAX - t_MIN).days / interval))]
     while(all[-1][1] > t_MAX):
         all.pop()
         # all[-1] = (all[-1][0], t_MAX)
     return all
 # Check match of specified feature across two DataFrames
+
+
 def crossmatch(df_1, df_2, feature):
     if(len(df_1) != len(df_2)):
         return False
@@ -231,18 +305,22 @@ def crossmatch(df_1, df_2, feature):
         return True
     return False
 # Plot extremas in data
-def extremas(dist, FIG_SIZE = (11.7, 8.27), plot = False, title = '', normalize_y = True):
+
+
+def extremas(dist, FIG_SIZE=(11.7, 8.27), plot=False, title='', normalize_y=True):
     min_indices = localmins(dist)[0]
     max_indices = scipy.signal.find_peaks(dist)[0]
     if(plot):
-        fig = plt.figure(figsize = FIG_SIZE)
+        fig = plt.figure(figsize=FIG_SIZE)
         plt.plot([x for x in range(len(dist))], dist)
         for mark in min_indices:
-            plt.axvline(x = mark, color = 'blue', dashes = (2, 4))
+            plt.axvline(x=mark, color='blue', dashes=(2, 4))
         for mark in max_indices:
-            plt.axvline(x = mark, color = 'red', dashes = (2, 4))
-    min_info = dict([(min_index, np.abs(dist[min_index])) for min_index in min_indices])
-    max_info = dict([(max_index, dist[max_index]) for max_index in max_indices])
+            plt.axvline(x=mark, color='red', dashes=(2, 4))
+    min_info = dict([(min_index, np.abs(dist[min_index]))
+                     for min_index in min_indices])
+    max_info = dict([(max_index, dist[max_index])
+                     for max_index in max_indices])
 
     min_norm = {}
     max_norm = {}
@@ -259,29 +337,33 @@ def extremas(dist, FIG_SIZE = (11.7, 8.27), plot = False, title = '', normalize_
 
     return min_info, max_info
 # Find all local minimas
+
+
 def localmins(a):
     a = np.array(a)
-    begin = np.empty(a.size//2+1,np.int32)
-    end = np.empty(a.size//2+1,np.int32)
+    begin = np.empty(a.size // 2 + 1, np.int32)
+    end = np.empty(a.size // 2 + 1, np.int32)
     i = k = 0
-    begin[k]=0
-    search_end=True
-    while i < a.size-1:
-        if a[i]>a[i+1]:
-            begin[k]=i+1
-            search_end=True
-        if search_end and a[i]<a[i+1]:
-            end[k]=i
-            k+=1
-            search_end=False
+    begin[k] = 0
+    search_end = True
+    while i < a.size - 1:
+        if a[i] > a[i + 1]:
+            begin[k] = i + 1
+            search_end = True
+        if search_end and a[i] < a[i + 1]:
+            end[k] = i
+            k += 1
+            search_end = False
         i += 1
-    if search_end and i>0  : # Final plate if exists
-        end[k]=i
-        k+=1
-    return begin[:k],end[:k]
+    if search_end and i > 0:  # Final plate if exists
+        end[k] = i
+        k += 1
+    return begin[:k], end[:k]
 
     print(*zip(*localmins(test03)))
 # Ensure selected keys actaully exist in DataFrame
+
+
 def verify_params(df, specified, actual):
     alert = False
     for val_expected in specified:
@@ -289,9 +371,12 @@ def verify_params(df, specified, actual):
             print('Value "' + val_expected + '" not present inputted data.')
             alert = True
     if(alert):
-        raise ValueError('One or more incompatibilities in specified and actual elements.')
+        raise ValueError(
+            'One or more incompatibilities in specified and actual elements.')
 # Major process logger
-def process_logger(record, START_TIME, name = 'script_logger.txt'):
+
+
+def process_logger(record, START_TIME, name='script_logger.txt'):
     if not os.path.exists(name):
         text_file = open(name, "w")
     else:
@@ -301,16 +386,19 @@ def process_logger(record, START_TIME, name = 'script_logger.txt'):
     last_time = START_TIME + elapsed_time
     delta_time = datetime.now() - last_time
 
-    text_file.writelines('Elapsed: ' + str(elapsed_time) + "\t →  " + record + '\n')
+    text_file.writelines('Elapsed: ' + str(elapsed_time) +
+                         "\t →  " + record + '\n')
     # text_file.writelines('Elapsed: ' + str(elapsed_time) + "\t Delta: " + str(delta_time) + ":: " + record + '\n')
     text_file.close()
 # Visualization of ~space compexity for `windows` algorithm
+
+
 def analyze_window_algo(t_EXTREMES):
     a = []
     color_map = []
     for j in range(1, 100):
         for i in range(1, 1000):
-            frames = windows(t_EXTREMES[0], t_EXTREMES[1], interval = i, step = j)
+            frames = windows(t_EXTREMES[0], t_EXTREMES[1], interval=i, step=j)
             window_size = len(frames)
             if(frames[-1][1] < t_MAX):
                 color_map.append('red')
@@ -318,26 +406,35 @@ def analyze_window_algo(t_EXTREMES):
                 color_map.append('blue')
             a.append((j, i, window_size))
 
-    fig = plt.figure(figsize = (44, 32))
-    ax = fig.add_subplot(111, projection = '3d')
+    fig = plt.figure(figsize=(44, 32))
+    ax = fig.add_subplot(111, projection='3d')
     ax.set_xlabel('step size')
     ax.set_ylabel('interval size')
     ax.set_zlabel('window size')
-    ax.scatter([i[0] for i in a], [i[1] for i in a], [i[2] for i in a], c = color_map)
+    ax.scatter([i[0] for i in a], [i[1] for i in a], [i[2]
+                                                      for i in a], c=color_map)
     plt.show()
 # Function to convert an R object to a Python dictionary
+
+
 def robj_to_dict(robj):
     return dict(zip(robj.names, map(list, robj)))
 # Pickle object
+
+
 def save_pickle(name, data):
     with open(name + '.pickle', 'wb') as handle:
-        pickle.dump(data, handle, protocol = pickle.HIGHEST_PROTOCOL)
+        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 # Load picked object
+
+
 def load_pickle(name):
     with open(name + '.pickle', 'rb') as handle:
         pickled = pickle.load(handle)
     return pickled
 # Merge dicts
+
+
 def merge_dicts(*dicts):
     d = {}
     for dict in dicts:
@@ -347,6 +444,7 @@ def merge_dicts(*dicts):
             except KeyError:
                 d[key] = [dict[key]]
     return d
+
 
 ############################################################
 ##################### DATA PROCESSING ######################
@@ -358,7 +456,8 @@ df_vawn = pd.read_csv(PATH_VAWN)
 df_ALL = [df_sandall, df_edamE, df_edamW, df_vawn]
 
 # Updating the elements in a list inplace will mutate the original
-_ = [df.drop('Unnamed: 0', 1, inplace = True) for df in df_ALL if 'Unnamed: 0' in df]
+_ = [df.drop('Unnamed: 0', 1, inplace=True)
+     for df in df_ALL if 'Unnamed: 0' in df]
 
 ############################################################
 #################### ANOMALY DETECTION #####################
@@ -372,27 +471,27 @@ df[TIME_COL] = df[TIME_COL].apply(lambda x: x.date())
 ALL_GROUPS = df[GROUPBY_COL].unique()
 # Also linked to MODEL INPUT !!!!!
 ALL_FEATURES = [
- 'dly_stm',
- 'inj_tubing_pressure',
- 'inj_casing_pressure',
- 'stm_tubing_temperature',
- 'chlorides',
- 'oil_sales',
- 'water_sales',
- 'gas_sales',
- 'prd_tubing_pressure',
- 'prd_casing_pressure',
- 'prd_tubing_temperature',
- 'spm_rpm',
- 'pump_efficiency',
- # 'prod_runtime_hours',
- # 'inj_runtime_hours'
- 'runtime_hours'
+    'dly_stm',
+    'inj_tubing_pressure',
+    'inj_casing_pressure',
+    'stm_tubing_temperature',
+    'chlorides',
+    'oil_sales',
+    'water_sales',
+    'gas_sales',
+    'prd_tubing_pressure',
+    'prd_casing_pressure',
+    'prd_tubing_temperature',
+    'spm_rpm',
+    'pump_efficiency',
+    # 'prod_runtime_hours',
+    # 'inj_runtime_hours'
+    'runtime_hours'
 ]
 
 # Verify that all group and feature paramaters exist in dataset
-verify_params(df, specified = ALL_FEATURES, actual = df.columns)
-verify_params(df, specified = ALL_GROUPS, actual = df[GROUPBY_COL].unique())
+verify_params(df, specified=ALL_FEATURES, actual=df.columns)
+verify_params(df, specified=ALL_GROUPS, actual=df[GROUPBY_COL].unique())
 
 ########################################
 ######### FEATURE ENGINEERING ##########
@@ -410,24 +509,27 @@ for group in ALL_GROUPS:
 
         # Determine filtered DataFrame based on chosen parameters; and
         # Sort DataFrame by time
-        filtered_df = reset_df_index(df[df[GROUPBY_COL] == groupby_value].sort_values(by = TIME_COL))
+        filtered_df = reset_df_index(
+            df[df[GROUPBY_COL] == groupby_value].sort_values(by=TIME_COL))
         # Determine start and end days for DataFrame
         t_MIN = filtered_df[TIME_COL][0]
         t_MAX = filtered_df[TIME_COL][filtered_df.shape[0] - 1]
         t_EXTREMES = (t_MIN, t_MAX)
 
         # Determine window ranges
-        time_ranges = windows(t_EXTREMES[0], t_EXTREMES[1], interval = INTERVAL, step = STEP)
+        time_ranges = windows(
+            t_EXTREMES[0], t_EXTREMES[1], interval=INTERVAL, step=STEP)
         # Harvests statistical features from outlier-trimmed dataset
-        well_statistics, headers = feature_harvest(time_ranges, filtered_df, foi, TIME_COL, GROUPBY_COL, groupby_value)
+        well_statistics, headers = feature_harvest(
+            time_ranges, filtered_df, foi, TIME_COL, GROUPBY_COL, groupby_value)
         # Assign and update statistical information to feature tracker
-        well_stats = pd.DataFrame(well_statistics, columns = headers)
+        well_stats = pd.DataFrame(well_statistics, columns=headers)
         STATS_by_feature[feature] = well_stats.copy()
 
     # Update statistical information to group tracker
     STATS_by_group[group] = STATS_by_feature.copy()
     STATS_by_feature.clear()
-    process_logger(group, START_TIME, name = 'group_script_logger.txt')
+    process_logger(group, START_TIME, name='group_script_logger.txt')
 
 ### SAVE DATA ###
 name = 'sandall_harvest_outliers-statistics_higheres'
@@ -470,10 +572,13 @@ for pad in df[PAD_COL].unique():
     df_filtered = df[df[PAD_COL] == pad]
     for group in df_filtered[GROUPBY_COL].unique():
         for feature in ALL_FEATURES:
-            time_series = np.array(df_filtered[df_filtered[GROUPBY_COL] == group][feature])
-            changepoints = change_detection_ts(time_series, penalty = 'bic', plot = False, title_append = pad + ", " + group + ", " + feature)
+            time_series = np.array(
+                df_filtered[df_filtered[GROUPBY_COL] == group][feature])
+            changepoints = change_detection_ts(
+                time_series, penalty='bic', plot=False, title_append=pad + ", " + group + ", " + feature)
             changepoint_record_by_feature[feature] = changepoints
-        changepoint_record_by_group[group] = changepoint_record_by_feature.copy()
+        changepoint_record_by_group[group] = changepoint_record_by_feature.copy(
+        )
         changepoint_record_by_feature.clear()
     changepoint_record_by_pad[pad] = changepoint_record_by_group.copy()
     changepoint_record_by_group.clear()
@@ -487,10 +592,13 @@ changepoint_record_by_pad = load_pickle('changepoint_record_by_pad')
 ###### ONLINE ANOMALY DETECTION ########
 # Local Dependencies: reset_df_index, snakify (2) functions,
 # Python Dependencies: IsolationForest, itertools
-def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_contamination = 0.1, phase_contamination = 0.01, TIME_COL = 'production_date', PAD_COL = 'pad_name', GROUPBY_COL = 'pair_name', plot = False):
+
+
+def phase_outlier_detection(data, well, feature, mode, diff_thresh=100, net_contamination=0.1, phase_contamination=0.01, TIME_COL='production_date', PAD_COL='pad_name', GROUPBY_COL='pair_name', plot=False):
     # Snakify columns and feature name
     data = util_snakify_cols(data)
-    feature, TIME_COL, PAD_COL, GROUPBY_COL = snakecase(feature).replace('__', '_'), snakecase(TIME_COL).replace('__', '_'), snakecase(PAD_COL).replace('__', '_'), snakecase(GROUPBY_COL).replace('__', '_')
+    feature, TIME_COL, PAD_COL, GROUPBY_COL = snakecase(feature).replace('__', '_'), snakecase(TIME_COL).replace(
+        '__', '_'), snakecase(PAD_COL).replace('__', '_'), snakecase(GROUPBY_COL).replace('__', '_')
 
     # Data-type verification and variable settings
     FIG_SIZE = (12, 8.27)
@@ -507,40 +615,45 @@ def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_co
         if(phase_contamination != 'auto'):
             phase_contamination = float(phase_contamination)
             if(phase_contamination < 0.0 or phase_contamination > 1.0):
-                raise ValueError('XXX `phase_contamination` is outside 0-1 range. XXX')
+                raise ValueError(
+                    'XXX `phase_contamination` is outside 0-1 range. XXX')
     elif(mode == 'overall'):
         phase_contamination = None
         if(net_contamination != 'auto'):
             net_contamination = float(net_contamination)
             if(net_contamination < 0.0 or net_contamination > 1.0):
-                raise ValueError('XXX `net_contamination` is outside 0-1 range. XXX')
+                raise ValueError(
+                    'XXX `net_contamination` is outside 0-1 range. XXX')
     diff_thresh = int(diff_thresh)
     TIME_COL = str(TIME_COL)
     ALL_FEATURES = [
-     'dly_stm',
-     'inj_tubing_pressure',
-     'inj_casing_pressure',
-     'stm_tubing_temperature',
-     'chlorides',
-     'oil_sales',
-     'water_sales',
-     'gas_sales',
-     'prd_tubing_pressure',
-     'prd_casing_pressure',
-     'prd_tubing_temperature',
-     'spm_rpm',
-     'pump_efficiency',
-     # 'prod_runtime_hours',
-     # 'inj_runtime_hours'
-     'runtime_hours'
+        'dly_stm',
+        'inj_tubing_pressure',
+        'inj_casing_pressure',
+        'stm_tubing_temperature',
+        'chlorides',
+        'oil_sales',
+        'water_sales',
+        'gas_sales',
+        'prd_tubing_pressure',
+        'prd_casing_pressure',
+        'prd_tubing_temperature',
+        'spm_rpm',
+        'pump_efficiency',
+        # 'prod_runtime_hours',
+        # 'inj_runtime_hours'
+        'runtime_hours'
     ]
 
     # High-level data re-structuring
-    data = reset_df_index(data[(data[PAD_COL] == pad) & (data[GROUPBY_COL] == well)]).sort_values(by = TIME_COL)
+    data = reset_df_index(data[(data[PAD_COL] == pad) & (
+        data[GROUPBY_COL] == well)]).sort_values(by=TIME_COL)
 
-    normalized_feature_data = data.copy()[ALL_FEATURES + [TIME_COL, PAD_COL, GROUPBY_COL]]
+    normalized_feature_data = data.copy(
+    )[ALL_FEATURES + [TIME_COL, PAD_COL, GROUPBY_COL]]
     for feature in ALL_FEATURES:
-        normalized_feature_data[feature] = util_normalize(normalized_feature_data[feature])
+        normalized_feature_data[feature] = util_normalize(
+            normalized_feature_data[feature])
 
     data = data[[feature, TIME_COL, PAD_COL, GROUPBY_COL]]
     # !!! NOTE THESE COLUMN NAMES MUST BE SNAKE_CASE COMPATIBLE
@@ -549,13 +662,14 @@ def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_co
 
     # Analyze whole dataset for outlier detection
     if(mode == 'overall'):
-        ### Full-based Outlier Detection
-        clf = IsolationForest(n_estimators = 100, max_samples = 'auto', contamination = net_contamination, max_features = 1.0, behaviour = 'new')
+        # Full-based Outlier Detection
+        clf = IsolationForest(n_estimators=100, max_samples='auto',
+                              contamination=net_contamination, max_features=1.0, behaviour='new')
         clf.fit(data[[feature]])
         info = clf.decision_function(data[[feature]])
         anomalies = clf.predict(data[[feature]])
         if(plot):
-            fig, ax = plt.subplots(figsize = FIG_SIZE)
+            fig, ax = plt.subplots(figsize=FIG_SIZE)
             plt.plot(data[TIME_COL], data[feature])
         for status_i in range(len(anomalies)):
             if(anomalies[status_i] == -1):
@@ -563,12 +677,13 @@ def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_co
                 data.at[status_i, 'anomaly'] = 'Yes'
                 data.at[status_i, 'score'] = info[status_i]
                 if(plot):
-                    ax.scatter(data[TIME_COL][status_i], dpt, facecolors = 'none', edgecolors = 'r')
+                    ax.scatter(data[TIME_COL][status_i], dpt,
+                               facecolors='none', edgecolors='r')
         if(plot):
             plt.show()
     # Analyze dataset for outlier detection in segments
     else:
-        ### Phase-based Outlier Detection
+        # Phase-based Outlier Detection
         diff_thresh = diff_thresh
         min_time = data[TIME_COL].iloc[0]
         max_time = data[TIME_COL].iloc[-1]
@@ -577,29 +692,36 @@ def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_co
         now_time = min_time
 
         # Find change points and determine windows
-        cpoints = rpt.Pelt(model = "rbf").fit(np.array(data[feature])).predict(pen = 10)
-        cpoints = [cpoints[i] for i in range(len(cpoints) - 1) if cpoints[i + 1] >= cpoints[i] + diff_thresh]
+        cpoints = rpt.Pelt(model="rbf").fit(
+            np.array(data[feature])).predict(pen=10)
+        cpoints = [cpoints[i] for i in range(
+            len(cpoints) - 1) if cpoints[i + 1] >= cpoints[i] + diff_thresh]
         if((max_time - min_time).days + 1 not in cpoints):
             cpoints.insert(len(cpoints), (max_time - min_time).days + 1)
         for i in range(len(cpoints)):
-            new_sections.append((now_time, min_time + timedelta(days = cpoints[i])))
-            now_time = min_time + timedelta(days = cpoints[i])
+            new_sections.append(
+                (now_time, min_time + timedelta(days=cpoints[i])))
+            now_time = min_time + timedelta(days=cpoints[i])
 
         # Plotting option
         if(plot):
-            fig, ax = plt.subplots(figsize = FIG_SIZE)
+            fig, ax = plt.subplots(figsize=FIG_SIZE)
             # Plot raw inputted data
             plt.plot(data[TIME_COL], data[feature])
             # Plot change points
             for pt in cpoints:
-                plt.axvline(min_time + timedelta(days = pt), alpha = 0.3, c = 'red', dashes = (2, 2), linewidth = 2)
+                plt.axvline(min_time + timedelta(days=pt), alpha=0.3,
+                            c='red', dashes=(2, 2), linewidth=2)
 
         # Determine phase-specific outliers and plot
         for window in new_sections:
-            phase_data = data[(data[TIME_COL] > window[0]) & (data[TIME_COL] <= window[1])].copy()
+            phase_data = data[(data[TIME_COL] > window[0]) &
+                              (data[TIME_COL] <= window[1])].copy()
             if(phase_contamination != 'auto'):
-                phase_contamination = (window[1] - window[0]).days/(max_time -  min_time).days * phase_contamination
-            clf = IsolationForest(n_estimators = 100, max_samples = 'auto', contamination = phase_contamination, max_features = 1.0, behaviour = 'new')
+                phase_contamination = (
+                    window[1] - window[0]).days / (max_time - min_time).days * phase_contamination
+            clf = IsolationForest(n_estimators=100, max_samples='auto',
+                                  contamination=phase_contamination, max_features=1.0, behaviour='new')
             clf.fit(phase_data[[feature]])
             info = clf.decision_function(data[[feature]])
             anomalies = clf.predict(data[[feature]])
@@ -608,7 +730,8 @@ def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_co
                 if(dict(grouping)[status_i] == -1):
                     dpt = phase_data[feature][status_i]
                     if(plot):
-                        ax.scatter(phase_data[TIME_COL][status_i], dpt, facecolors = 'none', edgecolors = 'r')
+                        ax.scatter(
+                            phase_data[TIME_COL][status_i], dpt, facecolors='none', edgecolors='r')
             grouping = list(zip(phase_data.index, anomalies, info))
             all_groups.append(grouping)
         anom_track_final = list(chain.from_iterable(all_groups))
@@ -618,12 +741,15 @@ def phase_outlier_detection(data, well, feature, mode, diff_thresh = 100, net_co
                 data.at[status_i, 'anomaly'] = 'Yes'
                 data.at[status_i, 'score'] = info[status_i]
                 if(plot):
-                    ax.scatter(data[TIME_COL][tup[0]], dpt, facecolors = 'none', edgecolors = 'r')
+                    ax.scatter(data[TIME_COL][tup[0]], dpt,
+                               facecolors='none', edgecolors='r')
     plt.show()
     plt.close()
     return data, normalized_feature_data
 
-feature_specific, normalized_all = phase_outlier_detection(df, 'SA1_SA2', 'dly_stm', 'changepoint', plot = True)
+
+feature_specific, normalized_all = phase_outlier_detection(
+    df, 'SA1_SA2', 'dly_stm', 'changepoint', plot=True)
 
 ### ### ### ### ###
 ### ### ### ### ###
@@ -646,21 +772,21 @@ for feature in ALL_FEATURES:
     cpts = changepoint_record_by_pad[pad][well][feature]
     cts.extend(cpts)
 for feature in ALL_FEATURES:
-    figure = plt.figure(figsize = (12, 8.27))
+    figure = plt.figure(figsize=(12, 8.27))
     plt.plot([i for i in range(len(data[TIME_COL]))], data[feature])
     cpts = changepoint_record_by_pad[pad][well][feature]
     plt.title(feature)
     for pt in cts:
-        plt.axvline(pt, alpha = 0.3, c = 'red', dashes = (2, 2))
+        plt.axvline(pt, alpha=0.3, c='red', dashes=(2, 2))
     for pt in cpts:
-        plt.axvline(pt, alpha = 0.9, c = 'black', dashes = (2, 2), linewidth = 4)
+        plt.axvline(pt, alpha=0.9, c='black', dashes=(2, 2), linewidth=4)
 
-hist, bin_edges = np.histogram(cts, bins = 100)
-figure = plt.figure(figsize = (12, 8.27))
+hist, bin_edges = np.histogram(cts, bins=100)
+figure = plt.figure(figsize=(12, 8.27))
 plt.plot(bin_edges[:len(bin_edges) - 1], hist)
 
 hist = [elem * elem for elem in util_normalize(hist)]
-min, max = extremas(util_smooth(hist, 3), plot = True)
+min, max = extremas(util_smooth(hist, 3), plot=True)
 ### ### ### ### ###
 ### ### ### ### ###
 ### ### ### ### ###
@@ -682,25 +808,31 @@ comparison_by_diff_metric = {}
 comparison_by_deriv_metric = {}
 for pad in df[PAD_COL].unique():
     df_filtered = df[df[PAD_COL] == pad]
-    GROUP_COMBOS = tuple(itertools.combinations(df_filtered[GROUPBY_COL].unique(), 2))
+    GROUP_COMBOS = tuple(itertools.combinations(
+        df_filtered[GROUPBY_COL].unique(), 2))
     for combo in GROUP_COMBOS:
         for feature in ALL_FEATURES:
-            stats_A, stats_B = STATS_by_group[combo[0]][feature], STATS_by_group[combo[1]][feature]
+            stats_A, stats_B = STATS_by_group[combo[0]
+                                              ][feature], STATS_by_group[combo[1]][feature]
             for metric in [elem for elem in list(stats_A.columns) if elem not in METRICS_TO_EXCLUDE]:
                 total += 1
-                metric_A, metric_B = np.array(stats_A[metric]), np.array(stats_B[metric])
+                metric_A, metric_B = np.array(
+                    stats_A[metric]), np.array(stats_B[metric])
                 window_A, window_B = len(metric_A), len(metric_B)
                 if(window_A != window_B):
                     delta.append(window_A - window_B)
-                    unable.append((pad, combo, metric, window_A, window_B, window_A - window_B))
+                    unable.append((pad, combo, metric, window_A,
+                                   window_B, window_A - window_B))
                 else:
-                    metric_A, metric_B = util_normalize(metric_A), util_normalize(metric_B)
+                    metric_A, metric_B = util_normalize(
+                        metric_A), util_normalize(metric_B)
                     difference = metric_A - metric_B
                     dx = 1
-                    deriv = np.diff(difference)/dx
+                    deriv = np.diff(difference) / dx
                     comparison_by_diff_metric[metric] = difference
                     comparison_by_deriv_metric[metric] = deriv
-            comparison_by_feature[feature] = {'differences': comparison_by_diff_metric.copy(), 'derivatives': comparison_by_deriv_metric.copy()}
+            comparison_by_feature[feature] = {'differences': comparison_by_diff_metric.copy(
+            ), 'derivatives': comparison_by_deriv_metric.copy()}
             comparison_by_diff_metric.clear()
             comparison_by_deriv_metric.clear()
         comparison_by_combo[combo] = comparison_by_feature.copy()
@@ -744,15 +876,18 @@ for pad in df[PAD_COL].unique():
                         if(len(difference) == 0):
                             continue
                         else:
-                            min_AB, max_AB = extremas(util_smooth(difference, SMOOTH_WINDOW), plot = False)
-                            metric_extremas[metric] = {'minimas': dict(), 'maximas': dict()}
+                            min_AB, max_AB = extremas(util_smooth(
+                                difference, SMOOTH_WINDOW), plot=False)
+                            metric_extremas[metric] = {
+                                'minimas': dict(), 'maximas': dict()}
                             metric_extremas[metric]['minimas'].update(min_AB)
                             metric_extremas[metric]['maximas'].update(max_AB)
                         i += 1
                     except KeyError:
                         # Nothing in metric
                         continue
-                feature_extremas[feature] = {'minimas': dict(), 'maximas': dict()}
+                feature_extremas[feature] = {
+                    'minimas': dict(), 'maximas': dict()}
 
                 min_combined_keys = []
                 min_combined_weights = []
@@ -760,32 +895,42 @@ for pad in df[PAD_COL].unique():
                 max_combined_weights = []
                 # merge all maxima/minimas and locations, metric-independent
                 for metric in metric_extremas.keys():
-                    min_combined_keys.extend(list(metric_extremas[metric]['minimas'].keys()))
-                    min_combined_weights.extend(list(metric_extremas[metric]['minimas'].values()))
-                    max_combined_keys.extend(list(metric_extremas[metric]['maximas'].keys()))
-                    max_combined_weights.extend(list(metric_extremas[metric]['maximas'].values()))
+                    min_combined_keys.extend(
+                        list(metric_extremas[metric]['minimas'].keys()))
+                    min_combined_weights.extend(
+                        list(metric_extremas[metric]['minimas'].values()))
+                    max_combined_keys.extend(
+                        list(metric_extremas[metric]['maximas'].keys()))
+                    max_combined_weights.extend(
+                        list(metric_extremas[metric]['maximas'].values()))
                 # First normalization after merge
-                combined_minimas_in_all_metrics = dict(zip(min_combined_keys, util_normalize(min_combined_weights)))
-                combined_maximas_in_all_metrics = dict(zip(max_combined_keys, util_normalize(max_combined_weights)))
+                combined_minimas_in_all_metrics = dict(
+                    zip(min_combined_keys, util_normalize(min_combined_weights)))
+                combined_maximas_in_all_metrics = dict(
+                    zip(max_combined_keys, util_normalize(max_combined_weights)))
                 # Sum weights in merged, looking for repetition
                 condensed_combined_minimas_in_all_metrics = {}
                 condensed_combined_maximas_in_all_metrics = {}
                 for key in sorted(set(combined_minimas_in_all_metrics.keys())):
-                    common_keys = [k for k, v in combined_minimas_in_all_metrics.items() if k == key]
+                    common_keys = [
+                        k for k, v in combined_minimas_in_all_metrics.items() if k == key]
                     sum = 0
                     for ck_i in common_keys:
                         sum += combined_minimas_in_all_metrics[ck_i]
                     condensed_combined_minimas_in_all_metrics[key] = sum
                 for key in sorted(set(combined_maximas_in_all_metrics.keys())):
-                    common_keys = [k for k, v in combined_maximas_in_all_metrics.items() if k == key]
+                    common_keys = [
+                        k for k, v in combined_maximas_in_all_metrics.items() if k == key]
                     sum = 0
                     for ck_i in common_keys:
                         sum += combined_maximas_in_all_metrics[ck_i]
                     condensed_combined_maximas_in_all_metrics[key] = sum
 
                 # Next Normalization
-                norms_min_dict = dict(zip(condensed_combined_minimas_in_all_metrics.keys(), util_normalize(list(condensed_combined_minimas_in_all_metrics.values()))))
-                norms_max_dict = dict(zip(condensed_combined_maximas_in_all_metrics.keys(), util_normalize(list(condensed_combined_maximas_in_all_metrics.values()))))
+                norms_min_dict = dict(zip(condensed_combined_minimas_in_all_metrics.keys(
+                ), util_normalize(list(condensed_combined_minimas_in_all_metrics.values()))))
+                norms_max_dict = dict(zip(condensed_combined_maximas_in_all_metrics.keys(
+                ), util_normalize(list(condensed_combined_maximas_in_all_metrics.values()))))
 
                 feature_extremas[feature]['minimas'] = norms_min_dict
                 feature_extremas[feature]['maximas'] = norms_max_dict
@@ -802,14 +947,19 @@ for pad in df[PAD_COL].unique():
         for combo in list(extremas_by_combo.keys()):
             if(well in combo):
                 match_iter += 1
-                extremas_by_well[well + '-' + str(match_iter)] = {'maximas': {}, 'minimas': {}}
-                extremas_by_well[well + '-' + str(match_iter)]['maximas'] = extremas_by_combo[combo]['maximas']
-                extremas_by_well[well + '-' + str(match_iter)]['minimas'] = extremas_by_combo[combo]['minimas']
+                extremas_by_well[well + '-' +
+                                 str(match_iter)] = {'maximas': {}, 'minimas': {}}
+                extremas_by_well[well + '-' +
+                                 str(match_iter)]['maximas'] = extremas_by_combo[combo]['maximas']
+                extremas_by_well[well + '-' +
+                                 str(match_iter)]['minimas'] = extremas_by_combo[combo]['minimas']
         merged_keys = []
         merged_values = []
         for match_iter_num in range(1, match_iter + 1):
-            curr_max = extremas_by_well[well + '-' + str(match_iter_num)]['maximas'].values()
-            curr_indices = extremas_by_well[well + '-' + str(match_iter_num)]['maximas'].keys()
+            curr_max = extremas_by_well[well + '-' +
+                                        str(match_iter_num)]['maximas'].values()
+            curr_indices = extremas_by_well[well +
+                                            '-' + str(match_iter_num)]['maximas'].keys()
             merged_values.extend(curr_max)
             merged_keys.extend(curr_indices)
         well_dict = dict(zip(merged_keys, merged_values))
@@ -822,13 +972,16 @@ for pad in df[PAD_COL].unique():
 
         well_dict_overall[well] = {}
         well_dict_overall[well]['maximas'] = {}
-        well_dict_overall[well]['maximas'] = dict(zip(well_dict.keys(), util_normalize(list(well_dict.values()))))
+        well_dict_overall[well]['maximas'] = dict(
+            zip(well_dict.keys(), util_normalize(list(well_dict.values()))))
 
         merged_keys = []
         merged_values = []
         for match_iter_num in range(1, match_iter + 1):
-            curr_min = extremas_by_well[well + '-' + str(match_iter_num)]['minimas'].values()
-            curr_indices = extremas_by_well[well + '-' + str(match_iter_num)]['minimas'].keys()
+            curr_min = extremas_by_well[well + '-' +
+                                        str(match_iter_num)]['minimas'].values()
+            curr_indices = extremas_by_well[well +
+                                            '-' + str(match_iter_num)]['minimas'].keys()
             merged_values.extend(curr_min)
             merged_keys.extend(curr_indices)
         well_dict = dict(zip(merged_keys, merged_values))
@@ -841,7 +994,8 @@ for pad in df[PAD_COL].unique():
 
         well_dict_overall[well] = {}
         well_dict_overall[well]['minimas'] = {}
-        well_dict_overall[well]['minimas'] = dict(zip(well_dict.keys(), util_normalize(list(well_dict.values()))))
+        well_dict_overall[well]['minimas'] = dict(
+            zip(well_dict.keys(), util_normalize(list(well_dict.values()))))
 
         match_iter = 0
 
@@ -849,15 +1003,18 @@ plt.plot(norms_min_dict.keys(), norms_min_dict.values())
 plt.plot(norms_max_dict.keys(), norms_max_dict.values())
 
 fig, ax = plt.subplots()
-ax.scatter(combined_minimas_in_all_metrics.keys(), combined_minimas_in_all_metrics.values())
+ax.scatter(combined_minimas_in_all_metrics.keys(),
+           combined_minimas_in_all_metrics.values())
 plt.show()
 
 metric_extremas['mean']['minimas']
 plt.plot([x for x in range(len(difference))], difference)
-plt.plot([x for x in range(len(util_smooth(difference, SMOOTH_WINDOW)))], util_smooth(difference, SMOOTH_WINDOW))
+plt.plot([x for x in range(len(util_smooth(difference, SMOOTH_WINDOW)))],
+         util_smooth(difference, SMOOTH_WINDOW))
 
 # Although specific feature is specific, the time range won't matter
-window_time_linkage = list(zip(STATS_by_group[well_A][feature]['window_start'], STATS_by_group[well_A][feature]['window_end']))
+window_time_linkage = list(zip(
+    STATS_by_group[well_A][feature]['window_start'], STATS_by_group[well_A][feature]['window_end']))
 
 plot_stats(STATS_by_group['SA1_SA2']['dly_stm'], 'median_abs_deviation')
 plot_stats(STATS_by_group['SA3_SA4']['dly_stm'], 'median_abs_deviation')
