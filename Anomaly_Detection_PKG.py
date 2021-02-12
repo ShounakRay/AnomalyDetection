@@ -3,7 +3,7 @@
 # @Email:  rijshouray@gmail.com
 # @Filename: Anomaly_Detection_PKG.py
 # @Last modified by:   Ray
-# @Last modified time: 11-Feb-2021 15:02:87:871  GMT-0700
+# @Last modified time: 11-Feb-2021 20:02:08:083  GMT-0700
 # @License: [Private IP]
 
 
@@ -25,9 +25,9 @@ from stringcase import snakecase
 # convert from normal text to snake case for all columns in df
 
 
-def util_snakify_cols(df):
-    df.columns = [snakecase(col).replace('__', '_') for col in df.columns]
-    return df
+def util_snakify(iter):
+    output = [snakecase(col).replace('__', '_') for col in iter]
+    return output
 # Return cleaned DataFrame
 
 
@@ -48,7 +48,7 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
                            gamma='scale', nu='0.5', model_name='rbf', diff_thresh=256, N_EST=100, contamination='0.1',
                            TIME_COL='production_date', GROUPBY_COL='pair_name', plot=False, seed=42, n_jobs=-1):
     # Snakify columns and feature name
-    data = util_snakify_cols(data)
+    data.columns = util_snakify(data.columns)
     feature, TIME_COL, GROUPBY_COL = snakecase(feature).replace('__', '_'), snakecase(TIME_COL).replace('__', '_'), snakecase(GROUPBY_COL).replace('__', '_')
 
     # Data-type verification and variable settings
@@ -114,7 +114,7 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
             'runtime_hours'
         ]
     else:
-        pass
+        ALL_FEATURES = util_snakify(ALL_FEATURES)
 
     # High-level data re-structuring and spec filtering
     data = reset_df_index(data[data[GROUPBY_COL] == well]).sort_values(by=TIME_COL)
