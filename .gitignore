@@ -1,3 +1,11 @@
+# Exclude Animation Videos
+Animations/Visualizations
+
+# Exclude Data
+Data
+Intermediate Data Pickles
+Source Data Pickles
+
 # System Files
 .DS_Store
 
