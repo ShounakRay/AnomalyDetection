@@ -3,7 +3,7 @@
 # @Email:  rijshouray@gmail.com
 # @Filename: Anomaly_Detection_PKG.py
 # @Last modified by:   Ray
-# @Last modified time: 19-Feb-2021 15:02:69:698  GMT-0700
+# @Last modified time: 30-Mar-2021 13:03:88:882  GMT-0600
 # @License: [Private IP]
 
 
@@ -46,13 +46,14 @@ def util_normalize(list):
 
 def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='Offline Outlier', mode='overall',
                            gamma='scale', nu='0.5', model_name='rbf', diff_thresh=256, N_EST=100, contamination='0.1',
-                           TIME_COL='production_date', GROUPBY_COL='pair_name', plot=False, seed=42, n_jobs=-1):
+                           TIME_COL='production_date', GROUPBY_COL='pair_name', plot=False, seed=42, n_jobs=-1,
+                           pen=3):
     # Snakify columns and feature name
-    data.columns = util_snakify(data.columns)
+    # data.columns = util_snakify(data.columns)
     feature, TIME_COL, GROUPBY_COL = snakecase(feature).replace('__', '_'), snakecase(TIME_COL).replace('__', '_'), snakecase(GROUPBY_COL).replace('__', '_')
 
     # Data-type verification and variable settings
-    FIG_SIZE = (12, 8.27)
+    # FIG_SIZE = (12, 8.27)
     data = pd.DataFrame(data)
     data[TIME_COL] = pd.to_datetime(data[TIME_COL])
     data[TIME_COL] = data[TIME_COL].apply(lambda x: x.date())
@@ -114,15 +115,14 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
             'runtime_hours'
         ]
     else:
-        ALL_FEATURES = util_snakify(ALL_FEATURES)
+        pass
+        # ALL_FEATURES = util_snakify(ALL_FEATURES)
 
     # High-level data re-structuring and spec filtering
     data = reset_df_index(data[data[GROUPBY_COL] == well]).sort_values(by=TIME_COL)
     data.drop([GROUPBY_COL], 1, inplace=True)
-    data.to_html('DATA_FILE_ANOMALY.html')
+    # data.to_html('DATA_FILE_ANOMALY.html')
     # Filters for normalized DataFrame
-    print([TIME_COL] + ALL_FEATURES)
-    print(data)
     normalized_feature_data = data.copy()[[TIME_COL] + ALL_FEATURES]
     for ft in ALL_FEATURES:
         normalized_feature_data[ft] = util_normalize(normalized_feature_data[ft])
@@ -137,9 +137,11 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
                                   random_state=seed, n_jobs=-1):
         clf = IsolationForest(n_estimators=N_EST, max_samples='auto', contamination=contamination,
                               max_features=1.0, random_state=seed, n_jobs=-1)
-        clf.fit(data[['selection']])
-        info = clf.decision_function(data[['selection']])
-        anomalies = clf.predict(data[['selection']])
+        extracted = data[['selection']]
+        extracted = extracted.interpolate('linear').fillna(extracted.mean()).fillna(0)
+        clf.fit(extracted)
+        info = clf.decision_function(extracted)
+        anomalies = clf.predict(extracted)
         return info, anomalies
 
     def novetly_detection_OCSVM(data, model_name, gamma=gamma, nu=nu, TIME_COL=TIME_COL):
@@ -176,26 +178,26 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
         elif(method == 'Offline DBSCAN'):
             info, anomalies = outlier_detection_DBSCAN(data, eps=0.5, min_samples=5, leaf_size=30, n_jobs=-1)
 
-        if(plot):
-            fig, ax = plt.subplots(figsize=FIG_SIZE)
-            plt.plot(data[TIME_COL], data['selection'])
+        # if(plot):
+        #     fig, ax = plt.subplots(figsize=FIG_SIZE)
+        #     plt.plot(data[TIME_COL], data['selection'])
         anoms_internal = []
         score_internal = []
         for status_i in range(len(anomalies)):
             if(anomalies[status_i] == -1):
-                dpt = data['selection'][status_i]
+                # dpt = data['selection'][status_i]
                 anoms_internal.append('Yes')
                 score_internal.append(info[status_i])
-                if(plot):
-                    ax.scatter(data[TIME_COL][status_i], dpt, facecolors='none', edgecolors='r')
+                # if(plot):
+                #     ax.scatter(data[TIME_COL][status_i], dpt, facecolors='none', edgecolors='r')
             else:
                 anoms_internal.append('No')
                 score_internal.append(max(info))
         data['anomaly'] = anoms_internal.copy()
         data['scores'] = score_internal.copy()
-        if(plot):
-            plt.title(well + ", " + feature + ", " + mode)
-            plt.show()
+        # if(plot):
+        #     plt.title(well + ", " + feature + ", " + mode)
+        #     plt.show()
     # Analyze dataset for outlier detection in segments
     else:
         # Phase-based Outlier Detection
@@ -206,8 +208,8 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
         now_time = min_time
 
         # Find change points and determine windows
-        cpoints = rpt.Pelt(model=model_name).fit(np.array(data['selection'])).predict(pen=3)
-        cpoints = [cpoints[i] for i in range(len(cpoints) - 1) if cpoints[i + 1] >= cpoints[i] + diff_thresh]
+        cpoints = rpt.Pelt(model=model_name, jump=diff_thresh).fit(np.array(data['selection'])).predict(pen=pen)
+        # cpoints = [cpoints[i] for i in range(len(cpoints) - 1) if cpoints[i + 1] >= cpoints[i] + diff_thresh]
         if((max_time - min_time).days + 1 not in cpoints):
             cpoints.insert(len(cpoints), (max_time - min_time).days + 1)
         for i in range(len(cpoints)):
@@ -215,13 +217,13 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
             now_time = min_time + timedelta(days=cpoints[i])
 
         # Plotting option
-        if(plot):
-            fig, ax = plt.subplots(figsize=FIG_SIZE)
-            # Plot raw inputted data
-            plt.plot(data[TIME_COL], data['selection'])
-            # Plot change points
-            for pt in cpoints:
-                plt.axvline(min_time + timedelta(days=pt), alpha=0.3, c='red', dashes=(2, 2), linewidth=2)
+        # if(plot):
+        #     fig, ax = plt.subplots(figsize=FIG_SIZE)
+        #     # Plot raw inputted data
+        #     plt.plot(data[TIME_COL], data['selection'])
+        #     # Plot change points
+        #     for pt in cpoints:
+        #         plt.axvline(min_time + timedelta(days=pt), alpha=0.3, c='red', dashes=(2, 2), linewidth=2)
 
         # Determine phase-specific outliers and plot
         for window in new_sections:
@@ -232,20 +234,22 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
             # if(phase_contamination != 'auto'):
             #     phase_contamination = (window[1] - window[0]).days/(max_time -  min_time).days * phase_contamination
 
+            phase_data = phase_data.interpolate('linear').fillna(data.mean())
+
             if(method == 'Offline Outlier'):
-                info, anomalies = outlier_detection_iforest(data, n_estimators=N_EST, max_samples='auto',
+                info, anomalies = outlier_detection_iforest(phase_data, n_estimators=N_EST, max_samples='auto',
                                                             contamination=phase_contamination, max_features=1.0,
                                                             random_state=seed, n_jobs=-1)
             elif(method == 'Online Novelty'):
-                info, anomalies = novetly_detection_OCSVM(data, model_name, gamma=gamma, nu=nu)
+                info, anomalies = novetly_detection_OCSVM(phase_data, model_name, gamma=gamma, nu=nu)
             elif(method == 'Offline DBSCAN'):
-                info, anomalies = outlier_detection_DBSCAN(data, eps=0.5, min_samples=5, leaf_size=30, n_jobs=-1)
+                info, anomalies = outlier_detection_DBSCAN(phase_data, eps=0.5, min_samples=5, leaf_size=30, n_jobs=-1)
             grouping = list(zip(phase_data.index, anomalies))
-            for status_i in phase_data.index:
-                if(dict(grouping)[status_i] == -1):
-                    dpt = phase_data['selection'][status_i]
-                    if(plot):
-                        ax.scatter(phase_data[TIME_COL][status_i], dpt, facecolors='none', edgecolors='r')
+            # for status_i in phase_data.index:
+            #     if(dict(grouping)[status_i] == -1):
+            #         dpt = phase_data['selection'][status_i]
+            #         if(plot):
+            #             ax.scatter(phase_data[TIME_COL][status_i], dpt, facecolors='none', edgecolors='r')
             grouping = list(zip(phase_data.index, anomalies, info))
             all_groups.append(grouping)
         anom_track_final = list(chain.from_iterable(all_groups))
@@ -253,53 +257,51 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
         score_internal = []
         for tup in anom_track_final:
             if(tup[1] == -1):
-                dpt = data['selection'][tup[0]]
+                # dpt = data['selection'][tup[0]]
                 anoms_internal.append('Yes')
                 score_internal.append(info[tup[0]])
-                if(plot):
-                    ax.scatter(data[TIME_COL][tup[0]], dpt, facecolors='none', edgecolors='r')
+                # if(plot):
+                #     ax.scatter(data[TIME_COL][tup[0]], dpt, facecolors='none', edgecolors='r')
             else:
                 anoms_internal.append('No')
                 score_internal.append(max(info))
         data['anomaly'] = anoms_internal.copy()
         data['scores'] = score_internal.copy()
-        if(plot):
-            plt.title(well + ", " + feature + ", " + mode + ", " + str(diff_thresh))
-            plt.show()
+        # if(plot):
+        #     plt.title(well + ", " + feature + ", " + mode + ", " + str(diff_thresh))
+        #     plt.show()
     plt.close()
 
-    # Map anomalies to normalized DataFrame
-    normalized_feature_data['anomaly_map'] = data['anomaly']
-    normalized_feature_data['score_map'] = data['scores']
-    f_maximas = []
-    for row in range(len(normalized_feature_data)):
-        if(normalized_feature_data.iloc[row]['anomaly_map'] == 'Yes'):
-            f_maximas.append(np.float64(np.max(list(normalized_feature_data.iloc[row][ALL_FEATURES]))))
-        else:
-            f_maximas.append(np.float64(0.0))
-    normalized_feature_data['frame_maximas'] = f_maximas
-    if(mode == 'changepoint'):
-        ns_lena = len(new_sections)
-        all_states = pd.DataFrame(new_sections)
-        all_states = all_states.append(pd.DataFrame({0: all_states[1][len(all_states) - 1],
-                                                     1: all_states[1][len(all_states) - 1]},
-                                                    index=[len(all_states)]))
-        all_states[1] = max(data['selection'])
-        all_states[2] = 1.0
-        all_states.columns = ['changepoint', 'regular_y', 'norm_y']
-    else:
-        ns_lena = 'N/A'
-        all_states = pd.DataFrame([{0: 0, 1: 1, 2: 2}, {0: 0, 1: 1, 2: 2}],
-                                  columns=['changepoint', 'regular_y', 'norm_y'])
-        all_states['changepoint'],
-        all_states['regular_y'],
-        all_states['norm_y'] = [data[TIME_COL].iloc[0], data[TIME_COL].iloc[len(data) - 1]],
-        [max(data['selection']), max(data['selection'])],
-        [1.0, 1.0]
+    # # Map anomalies to normalized DataFrame
+    # normalized_feature_data['anomaly_map'] = data['anomaly']
+    # normalized_feature_data['score_map'] = data['scores']
+    # f_maximas = []
+    # for row in range(len(normalized_feature_data)):
+    #     if(normalized_feature_data.iloc[row]['anomaly_map'] == 'Yes'):
+    #         f_maximas.append(np.float64(np.max(list(normalized_feature_data.iloc[row][ALL_FEATURES]))))
+    #     else:
+    #         f_maximas.append(np.float64(0.0))
+    # normalized_feature_data['frame_maximas'] = f_maximas
+    # if(mode == 'changepoint'):
+    #     ns_lena = len(new_sections)
+    #     all_states = pd.DataFrame(new_sections)
+    #     all_states = all_states.append(pd.DataFrame({0: all_states[1][len(all_states) - 1],
+    #                                                  1: all_states[1][len(all_states) - 1]},
+    #                                                 index=[len(all_states)]))
+    #     all_states[1] = max(data['selection'])
+    #     all_states[2] = 1.0
+    #     all_states.columns = ['changepoint', 'regular_y', 'norm_y']
+    # else:
+    #     ns_lena = 'N/A'
+    #     all_states = pd.DataFrame([{0: 0, 1: 1, 2: 2}, {0: 0, 1: 1, 2: 2}],
+    #                               columns=['changepoint', 'regular_y', 'norm_y'])
+    #     all_states['changepoint'] = [data[TIME_COL].iloc[0], data[TIME_COL].iloc[len(data) - 1]]
+    #     all_states['regular_y'] = [max(data['selection']), max(data['selection'])]
+    #     all_states['norm_y'] = [1.0, 1.0]
 
     normalized_feature_data.rename(columns={feature: 'selection'}, inplace=True)
 
-    return reset_df_index(data), reset_df_index(normalized_feature_data), ns_lena, reset_df_index(all_states)
+    return reset_df_index(data)
 
 # Complete anomaly detection with repetitions
 
@@ -307,10 +309,10 @@ def step_outlier_detection(data, well, feature, ALL_FEATURES=['None'], method='O
 def anomaly_detection(data, well, feature, ALL_FEATURES=['None'], method=['Offline Outlier'],
                       mode=['overall', 'changepoint'], gamma='scale', nu='0.5', model_name='rbf', diff_thresh=100,
                       N_EST=100, contamination=['0.1'], TIME_COL='production_date', GROUPBY_COL='pair_name',
-                      plot=False, seed=42, n_jobs=-1, iteration=1):
+                      plot=False, seed=42, n_jobs=-1, iteration=1, pen=3):
     iteration = int(iteration)
     ft = data[(data[GROUPBY_COL] == well)].sort_values(by=TIME_COL)
-    all_dates = list(data[TIME_COL])
+
     detect_track = []
     # Re-assign `iteration` if method/mode/contamination lengths are greater than argument
     if(iteration < len(method) or iteration < len(mode) or iteration < len(contamination)):
@@ -349,30 +351,30 @@ def anomaly_detection(data, well, feature, ALL_FEATURES=['None'], method=['Offli
         mode, method, contamination = relation['mode'], relation['method'], relation['contamination']
 
     for iter in range(iteration):
-        ft, total, new_sections, windows = step_outlier_detection(data, well, feature, ALL_FEATURES, method[0],
+        ft = step_outlier_detection(data, well, feature, ALL_FEATURES, method[0],
                                                                   mode[0], gamma, nu, model_name, diff_thresh, N_EST,
                                                                   contamination[0], TIME_COL, GROUPBY_COL, plot, seed,
-                                                                  n_jobs)
+                                                                  n_jobs, pen=pen)
 
         data = reset_df_index(data[data[GROUPBY_COL] == well]).sort_values(by=TIME_COL)
         for row in range(len(ft)):
             if(ft.iloc[row]['anomaly'] == 'Yes'):
                 data.drop(row, 0, inplace=True)
-        if(plot):
-            fig, ax = plt.subplots(figsize=(12, 9))
-            plt.plot(ft[ft['anomaly'] == 'No'][TIME_COL], ft[ft['anomaly'] == 'No']['selection'])
-            plt.title('Iteration ' + str(iter + 1))
-            ax.set_xlim(ft[TIME_COL][0], ft[TIME_COL][-1:])
-            ax.set_ylim(min(ft['selection']), 500)
-            plt.show()
+        # if(plot):
+        #     fig, ax = plt.subplots(figsize=(12, 9))
+        #     plt.plot(ft[ft['anomaly'] == 'No'][TIME_COL], ft[ft['anomaly'] == 'No']['selection'])
+        #     plt.title('Iteration ' + str(iter + 1))
+        #     ax.set_xlim(ft[TIME_COL][0], ft[TIME_COL][-1:])
+        #     ax.set_ylim(min(ft['selection'].dropna()), max(ft['selection'].dropna()))
+        #     plt.show()
 
         ft_dates = list(ft[ft['anomaly'] == 'Yes'][TIME_COL].copy())
 
         if(iter == 0):
             base = ft.copy()
-            base_norm = total.copy()
-            base_len = new_sections
-            base_windows = windows.copy()
+            # base_norm = total.copy()
+            # base_len = new_sections
+            # base_windows = windows.copy()
             for i in range(len(base)):
                 if(base.iloc[i]['anomaly'] == 'Yes'):
                     detect_track.append(str(iter + 1))
@@ -400,37 +402,37 @@ def anomaly_detection(data, well, feature, ALL_FEATURES=['None'], method=['Offli
             base['anomaly'] = ['Yes' if int(i) >= 1 else 'No' for i in new_detect_track.copy()]
             detect_track = new_detect_track.copy()
 
-    base_norm['detection_iter'] = detect_track.copy()
-    base_norm['anomaly_map'] = ['Yes' if int(i) >= 1 else 'No' for i in detect_track].copy()
+    # base_norm['detection_iter'] = detect_track.copy()
+    # base_norm['anomaly_map'] = ['Yes' if int(i) >= 1 else 'No' for i in detect_track].copy()
 
-    cpoints_final = list(base_windows['changepoint'])
-    cpoint_status = []
-    cpoint_y = []
-    cpoint_max = np.float64(base_windows['regular_y'][0])
-    for i in range(len(base)):
-        base_row_date = base[TIME_COL][i]
-        if(base_row_date in cpoints_final):
-            # Date is a changepoint
-            cpoint_status.append('Yes')
-            cpoint_y.append(cpoint_max)
-        else:
-            # Date is not a changepoint
-            cpoint_status.append('No')
-            cpoint_y.append(np.float64(0.0))
-    base['changepoint_status'] = cpoint_status.copy()
-    base['regular_y'] = [cpoint_max if i == 'Yes' else np.float64(0.0) for i in cpoint_status]
-    base_norm['changepoint_status'] = cpoint_status.copy()
-    base_norm['regular_y'] = [np.float64(1.0) if i == 'Yes' else np.float64(0.0) for i in cpoint_status]
+    # cpoints_final = list(base_windows['changepoint'])
+    # cpoint_status = []
+    # cpoint_y = []
+    # cpoint_max = np.float64(base_windows['regular_y'][0])
+    # for i in range(len(base)):
+    #     base_row_date = base[TIME_COL][i]
+    #     if(base_row_date in cpoints_final):
+    #         # Date is a changepoint
+    #         cpoint_status.append('Yes')
+    #         cpoint_y.append(cpoint_max)
+    #     else:
+    #         # Date is not a changepoint
+    #         cpoint_status.append('No')
+    #         cpoint_y.append(np.float64(0.0))
+    # base['changepoint_status'] = cpoint_status.copy()
+    # base['regular_y'] = [cpoint_max if i == 'Yes' else np.float64(0.0) for i in cpoint_status]
+    # base_norm['changepoint_status'] = cpoint_status.copy()
+    # base_norm['regular_y'] = [np.float64(1.0) if i == 'Yes' else np.float64(0.0) for i in cpoint_status]
 
     information = pd.DataFrame([{}])
     information['well_name'] = well
     information['feature_name'] = feature
     information['pct_anomalies'] = str(round((len(base[base['anomaly'] == 'Yes']) / (len(base))) * 100.0, 3)) + '%'
-    information['states'] = base_len
+    # information['states'] = base_len
 
     plt.close()
 
-    return base, base_norm, information, base_windows
+    return base, information
 
 # # # # FUNCTION CALL
 # __FOLDER__ = r'/Users/Ray/Documents/Python/9 - Oil and Gas/Husky'
